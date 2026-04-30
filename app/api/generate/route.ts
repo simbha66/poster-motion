@@ -6,8 +6,9 @@ export async function POST(request: Request) {
     const action = formData.get('action') as string;
     
     const API_KEY = process.env.GEMINI_API_KEY;
-    if (!API_KEY || API_KEY.startsWith("AIzaSy...")) {
-      return NextResponse.json({ error: 'Please set a valid GEMINI_API_KEY in .env.local' }, { status: 500 });
+    if (!API_KEY || API_KEY === "YOUR_GEMINI_API_KEY" || API_KEY.startsWith("AIzaSy...")) {
+      console.error('Missing or invalid GEMINI_API_KEY');
+      return NextResponse.json({ error: 'GEMINI_API_KEY is not configured correctly in environment variables.' }, { status: 500 });
     }
 
     if (action === 'optimize') {
@@ -32,7 +33,13 @@ export async function POST(request: Request) {
       });
 
       if (!textRes.ok) {
-          throw new Error("Text optimization failed");
+          const errorData = await textRes.json().catch(() => ({}));
+          console.error("Gemini Optimization API Error:", textRes.status, JSON.stringify(errorData, null, 2));
+          return NextResponse.json({ 
+            error: 'Text optimization failed', 
+            details: errorData.error?.message || 'Unknown API error',
+            status: textRes.status 
+          }, { status: 500 });
       }
       
       const textData = await textRes.json();
@@ -59,7 +66,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ 
             success: true, 
             image: `data:image/png;base64,${mockImageBase64}`,
-            warning: "API Key valid, but image generation resulted in an error."
+            warning: `API Key valid, but image generation resulted in an error: ${errText.substring(0, 100)}`
           });
       }
 
@@ -69,7 +76,13 @@ export async function POST(request: Request) {
           base64Image = imgData.candidates[0].content.parts[0].inlineData.data;
       } else {
           console.error("Gemini returned invalid structure:", JSON.stringify(imgData, null, 2));
-          throw new Error("No image data returned from Gemini");
+          // If it's a reasoning model, check if the data is in a different part
+          const dataPart = imgData.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.data);
+          if (dataPart) {
+            base64Image = dataPart.inlineData.data;
+          } else {
+            throw new Error("No image data returned from Gemini");
+          }
       }
 
       return NextResponse.json({ success: true, image: `data:image/jpeg;base64,${base64Image}` });
@@ -78,7 +91,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     
   } catch (error: any) {
-    console.error('API Error:', error.message || error);
-    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
+    console.error('API Route Crash:', error.message || error);
+    return NextResponse.json({ error: 'Server error processing request', details: error.message }, { status: 500 });
+
   }
 }
